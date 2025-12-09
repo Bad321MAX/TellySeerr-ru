@@ -17,20 +17,21 @@ async def start_cmd(client: Client, message: Message):
 
 HELP_TEXT = """
 ++Помощь JellyRequest Bot++
-++Команды пользователя:++• `/help`: Shows this help message.
-• `/link <username> <password>`: Link your Telegram account to your Jellyfin/Jellyseerr account.
-• `/unlink`: Remove the link between your accounts.
-• `/request <name>`: Search for a movie or TV show to request.
-• `/discover`: Browse popular and trending media.
-• `/requests`: View the status of your past requests.
-• `/watch`: See your personal watch statistics from Jellyfin.
+++Команды пользователя:++
+• `/help`: Показать этот сообщение помощи.
+• `/link <имя_пользователя> <пассворд>`: Привязать твой аккаунт Telegram к Jellyfin/Jellyseerr.
+• `/unlink`: Отвязать аккаунт.
+• `/request <название>`: Поиск и запрос фильма или сериала.
+• `/discover`: Обзор популярного и трендового.
+• `/requests`: Просмотр твоих запросов.
+• `/watch`: Статистика просмотров.
 
-**Admin Commands:**
-• `/invite` (reply to a user): Create a permanent account for the user.
-• `/trial` (reply to a user): Create a 7-day trial account for the user.
-• `/vip` (reply to a user): Create a 30-day trial account for the user.
-• `/listusers`: List all users registered in the bot's database.
-• `/deleteuser <username>`: Delete a user from Jellyfin, Jellyseerr, and the bot.
+++Админские команды:++
+• `/invite` (ответить пользователю): Создать постоянный аккаунт.
+• `/trial` (ответить пользователю): Пробный аккаунт на 7 дней.
+• `/vip` (ответить пользователю): VIP-аккаунт на 30 дней.
+• `/listusers`: Приветствие все пользователей.
+• `/deleteuser <имя>`: Удалить пользователя.• `/deleteuser <username>`: Delete a user from Jellyfin, Jellyseerr, and the bot.
 """
 
 
