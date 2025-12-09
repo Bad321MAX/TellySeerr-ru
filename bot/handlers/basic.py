@@ -8,19 +8,16 @@ from bot import app
 @app.on_message(filters.command("start", prefixes="/") & filters.private)
 async def start_cmd(client: Client, message: Message):
     await message.reply(
-        "👋 Welcome to the JellyRequest Bot!\n\n"
-        "You can use me to request media for your Jellyfin server.\n"
-        "To get started, you must link your account using the `/link` command.\n\n"
-        "Type `/help` to see all available commands.",
-        parse_mode=None,
-    )
+            "👋 Добро пожаловать в JellyRequest Bot!\n\n"        "You can use me to request media for your Jellyfin server.\n"
+            "Я помогу тебе запрашивать медиа для сервера Jellyfin.\n"        "Type `/help` to see all available commands.",
+            "Чтобы начать, свяжи свой аккаунт командой `/link`.\n\n"
+            "Напиши `/help`, чтобы увидеть все команды.",
+            parse_mode=None,    )
 
 
 HELP_TEXT = """
-**JellyRequest Bot Help**
-
-**User Commands:**
-• `/help`: Shows this help message.
+++Помощь JellyRequest Bot++
+++Команды пользователя:++• `/help`: Shows this help message.
 • `/link <username> <password>`: Link your Telegram account to your Jellyfin/Jellyseerr account.
 • `/unlink`: Remove the link between your accounts.
 • `/request <name>`: Search for a movie or TV show to request.
