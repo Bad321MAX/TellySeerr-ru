@@ -1,6 +1,6 @@
 {
   "start_welcome": "Добро пожаловать в бот для запросов медиа!\n\nВы можете запрашивать фильмы и сериалы для Jellyfin.\nДля начала привяжите аккаунт: /link\n\n/help — все команды",
-  "help_text": "**Помощь**\n\n• /link <логин> <пароль> — привязка\n• /unlink — отвязать\n• /request <название> — обычный поиск (фильмы + сериалы)\n• /series <название> — поиск только сериалов (русские названия, TheTVDB)\n• /discover — популярное\n• /requests — мои запросы\n• /watch — статистика просмотров\n\nАдмин: /invite, /trial, /vip, /deleteuser, /listusers",
+  "help_text": "**Помощь**\n\n• /link <логин> <пароль> — привязка\n• /unlink — отвязать\n• /request <название> — обычный поиск (фильмы + сериалы)\n• /series <название> — поиск сериалов по TheTVDB (русские названия)\n• /discover — популярное\n• /requests — мои запросы\n• /watch — статистика просмотров\n\nАдмин: /invite, /trial, /vip, /deleteuser, /listusers",
 
   "usage_link": "Использование: /link <логин> <пароль>",
   "linking": "Привязываю аккаунт…",
@@ -15,11 +15,11 @@
   "no_results": "Ничего не найдено",
   "result_header": "**{title} ({year})**\n_{type}_\n\n{overview}\n\nРезультат {current} из {total}",
   "no_overview": "Описание отсутствует",
+  "search_cache_expired": "Результаты поиска устарели. Повторите запрос",
 
   "request_success": "Запрос отправлен!",
-  "request_already": "Уже доступно или запрошено",
+  "request_already": "Уже запрошено или доступно",
   "request_callback_need_link": "Сначала привяжите аккаунт командой /link",
-  "search_cache_expired": "Результаты поиска устарели. Повторите запрос",
 
   "fetching_requests": "Загружаю ваши запросы…",
   "no_requests": "У вас пока нет запросов",
