@@ -1,15 +1,12 @@
 services:
   tellyseerr:
-    image: destroyer32/tellyseerr:latest
-    
-    container_name: tellyseerr 
-
     build:
       context: .
       dockerfile: Dockerfile
-      
+
+    container_name: tellyseerr
     restart: unless-stopped
-    
+
     env_file:
       - .env
 
