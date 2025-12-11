@@ -16,6 +16,9 @@ class Config(BaseSettings):
     JELLYFIN_URL: str
     JELLYFIN_API_KEY: str
 
+    TMDB_API_KEY: str
+    TVDB_API_KEY: str
+
     # Path to the database (defaults to the root folder)
     DB_PATH: str = "jellyseerr_bot.db"
 
