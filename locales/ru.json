@@ -1,0 +1,73 @@
+{
+  "start_welcome": "Добро пожаловать в бот для запросов медиа!\n\nВы можете запрашивать фильмы и сериалы для Jellyfin.\nДля начала привяжите аккаунт: /link\n\n/help — все команды",
+  "help_text": "**Помощь**\n\n• /link <логин> <пароль> — привязка\n• /unlink — отвязать\n• /request <название> — обычный поиск (фильмы + сериалы)\n• /series <название> — поиск только сериалов (русские названия, TheTVDB)\n• /discover — популярное\n• /requests — мои запросы\n• /watch — статистика просмотров\n\nАдмин: /invite, /trial, /vip, /deleteuser, /listusers",
+
+  "usage_link": "Использование: /link <логин> <пароль>",
+  "linking": "Привязываю аккаунт…",
+  "auth_failed": "Неверный логин или пароль Jellyfin",
+  "auth_error": "Ошибка авторизации в Jellyfin: {error}",
+  "link_success": "Аккаунт успешно привязан: {username}",
+  "link_not_found_in_jellyseerr": "Аккаунт есть в Jellyfin, но отсутствует в Jellyseerr. Обратитесь к администратору",
+  "generic_network_error": "Сетевая ошибка: {error}",
+  "generic_exception": "Произошла ошибка: {error}",
+
+  "searching": "Поиск…",
+  "no_results": "Ничего не найдено",
+  "result_header": "**{title} ({year})**\n_{type}_\n\n{overview}\n\nРезультат {current} из {total}",
+  "no_overview": "Описание отсутствует",
+
+  "request_success": "Запрос отправлен!",
+  "request_already": "Уже доступно или запрошено",
+  "request_callback_need_link": "Сначала привяжите аккаунт командой /link",
+  "search_cache_expired": "Результаты поиска устарели. Повторите запрос",
+
+  "fetching_requests": "Загружаю ваши запросы…",
+  "no_requests": "У вас пока нет запросов",
+
+  "fetching_watch": "Загружаю статистику просмотров…",
+  "watch_no_link": "Вы не привязали аккаунт. Используйте /link",
+  "watch_no_userid": "Не найден ID пользователя в Jellyfin",
+  "watch_stats_title": "Статистика {name}",
+  "watch_total_items": "Просмотрено: {count}",
+  "watch_total_time": "Время просмотра: {days}д {hours}ч {minutes}м",
+  "watch_last_watched": "Последний просмотр: {title}",
+  "no_last_watched": "Нет данных о просмотрах",
+
+  "season_all": "Все сезоны",
+  "season_all_requested": "Запрошены все сезоны",
+  "season_requested": "Запрошен сезон {season}",
+  "season_choose": "Выберите нужные сезоны:",
+
+  "button_prev": "Назад",
+  "button_next": "Вперёд",
+  "button_request": "Запросить",
+  "noop_button": " ",
+
+  "status_pending": "Ожидает",
+  "status_approved": "Одобрено",
+  "status_processing": "Обрабатывается",
+  "status_partially": "Частично доступно",
+  "status_available": "Доступно",
+  "status_unknown": "Неизвестно",
+
+  "unlink_no_link": "Аккаунт не привязан",
+  "unlink_success": "Аккаунт успешно отвязан",
+
+  "admin_not_authorized": "У вас нет прав на эту команду",
+
+  "invite_reply_required": "Ответьте на сообщение пользователя, чтобы создать постоянный аккаунт",
+  "trial_reply_required": "Ответьте на сообщение пользователя, чтобы выдать пробный доступ (7 дней)",
+  "vip_reply_required": "Ответьте на сообщение пользователя, чтобы выдать VIP-доступ (30 дней)",
+  "creating_user_processing": "Создаю аккаунт…",
+
+  "user_already_exists": "Пользователь уже существует: `{username}` (ID: `{id}`)",
+  "create_user_failed": "Не удалось создать пользователя в Jellyfin: {error}",
+  "create_user_success_dm": "Аккаунт создан, данные отправлены в ЛС",
+
+  "listusers_fetching": "Загружаю список пользователей…",
+  "listusers_no_users": "Пользователей не найдено",
+
+  "deleteuser_searching": "Ищу пользователя `{username}`…",
+  "deleteuser_not_found": "Пользователь `{username}` не найден ни в одной из систем",
+  "deleteuser_success": "Пользователь `{username}` успешно удалён из всех систем"
+}
