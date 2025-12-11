@@ -18,22 +18,23 @@ logger = logging.getLogger(__name__)
 
 
 USER_COMMANDS = [
-    BotCommand("start", "Start the bot"),
-    BotCommand("help", "Show this help message"),
-    BotCommand("request", "Request a movie/show. Usage: /request <name>"),
-    BotCommand("discover", "Discover popular and trending media"),
-    BotCommand("requests", "View your pending media requests"),
-    BotCommand("watch", "See your personal watch statistics"),
-    BotCommand("link", "Link your Jellyfin account. Usage: /link <user> <pass>"),
-    BotCommand("unlink", "Unlink your Jellyfin account"),
+    BotCommand("start", "Запустить бота"),
+    BotCommand("help", "Показать помощь"),
+    BotCommand("request", "Поиск фильмов и сериалов"),
+    BotCommand("series", "Поиск сериалов (TheTVDB, RU)"),
+    BotCommand("discover", "Популярное и тренды"),
+    BotCommand("requests", "Мои запросы"),
+    BotCommand("watch", "Моя статистика просмотров"),
+    BotCommand("link", "Привязать Jellyfin: /link <логин> <пароль>"),
+    BotCommand("unlink", "Отвязать Jellyfin"),
 ]
 
 ADMIN_COMMANDS = USER_COMMANDS + [
-    BotCommand("invite", "Reply to a user to create a permanent account"),
-    BotCommand("trial", "Reply to a user to create a 7-day trial"),
-    BotCommand("vip", "Reply to a user to create a 30-day VIP account"),
-    BotCommand("deleteuser", "Delete a user. Usage: /deleteuser <username>"),
-    BotCommand("listusers", "List all users on the Jellyfin server"),
+    BotCommand("invite", "Создать постоянный аккаунт (ответом)"),
+    BotCommand("trial", "Создать тестовый аккаунт на 7 дней"),
+    BotCommand("vip", "Создать VIP-аккаунт на 30 дней"),
+    BotCommand("deleteuser", "Удалить пользователя: /deleteuser <username>"),
+    BotCommand("listusers", "Показать всех пользователей Jellyfin"),
 ]
 
 
