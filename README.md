@@ -1,130 +1,162 @@
-# [TellySeerr]
+# TellySeerr
+
 [![Python Version](https://img.shields.io/badge/python-3.11-blue.svg)](https://www.python.org/downloads/)
 [![Linter: Ruff](https://img.shields.io/badge/linter-ruff-brightgreen.svg)](https://github.com/astral-sh/ruff)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-A powerful, all-in-one Telegram bot for managing your Jellyfin and Jellyseerr servers. It acts as a full-featured gateway for both you and your users, automating invites, handling media requests, and providing watch statistics.
-
-## ✨ Core Features
-
-### 👑 Admin Management
-* **Easy User Invites:** Simply reply to a user in Telegram to invite them:
-    * `/invite`: Creates a full, permanent Jellyfin/Jellyseerr account.
-    * `/trial`: Creates a 7-day trial account.
-    * `/vip`: Creates a 30-day VIP account.
-* **User Management:**
-    * `/deleteuser <username>`: Deletes a user from Jellyfin, Jellyseerr, and the bot's database.
-    * `/listusers`: Shows a complete list of all users on your Jellyfin server.
-* **Automatic Cleanup:** A background task runs daily to find and automatically delete expired trial/VIP users from all services.
-
-### 👤 User Features
-* **Self-Service Linking:** Users with existing accounts can link them to the bot with `/link <username> <password>`.
-* **Personal Stats:** Users can run `/watch` to see their personal watch time and total items played from Jellyfin.
-
-### 🎬 Media Requests (via Jellyseerr)
-* **Search & Discover:**
-    * `/request <name>`: Searches for new movies and shows.
-    * `/discover`: Shows a browsable list of popular and trending media.
-* **Full Request System:**
-    * Users can submit media requests directly through interactive buttons.
-    * `/requests`: Users can view the status of all their own pending requests.
-* **Smart Caching:** Search and discover results are cached for 1 hour to reduce API spam and improve speed.
+Удобный Telegram‑бот для управления серверами Jellyfin и Jellyseerr.  
+Позволяет админам автоматизировать выдачу доступов, а пользователям — запрашивать фильмы/сериалы и смотреть статистику просмотров.
 
 ---
 
-## 🚀 Getting Started
+## ✨ Основные возможности
 
-### Prerequisites
+### 👑 Управление пользователями (админ)
 
-1.  A **Telegram Bot**. Get your `BOT_TOKEN` from [BotFather](https://t.me/botfather).
-2.  Your **Telegram API ID & Hash**. Get these from [my.telegram.org](https://my.telegram.org).
-3.  A **Jellyfin** server. You need your **Server URL** and an **API Key** (generate one in Dashboard > API Keys).
-4.  A **Jellyseerr** server. You need your **Server URL** and your **API Key** (find in Jellyseerr Settings > General).
-5.  **Python 3.11+**
-6.  **Pipenv** (for managing dependencies).
+- **Быстрые приглашения по реплаю:**
+  - `/invite` — создать постоянный аккаунт (Jellyfin + Jellyseerr).
+  - `/trial` — выдать тестовый доступ на 7 дней.
+  - `/vip` — выдать VIP‑доступ на 30 дней.
+- **Управление пользователями:**
+  - `/deleteuser <username>` — удалить пользователя из Jellyfin, Jellyseerr и базы бота.
+  - `/listusers` — показать всех пользователей на сервере Jellyfin.
+- **Авто‑очистка:** фоновая задача раз в день находит и удаляет просроченных trial/VIP пользователей из всех систем.
 
-### ⚙️ Installation & Setup
+### 👤 Возможности для обычных пользователей
 
-1.  **Clone the repository:**
-    ```bash
-    git clone [https://github.com/DESTROYER-32/TellySeerr.git](https://github.com/DESTROYER-32/TellySeerr.git)
-    cd your-repo-name
+- **Самостоятельная привязка аккаунта:**  
+  `/link <логин> <пароль>` — привязка существующего аккаунта Jellyfin/Jellyseerr.  
+  `/unlink` — отвязка.
+- **Личная статистика:**  
+  `/watch` — общее время просмотра, количество просмотренных фильмов/серий и последний просмотренный тайтл.
+
+### 🎬 Запросы медиа (Jellyseerr + TMDB/TheTVDB)
+
+- **Поиск и подбор:**
+  - `/request <название>` — поиск фильмов и сериалов через Jellyseerr (TMDB). [web:2]
+  - `/series <название>` — поиск сериалов по русским названиям через TheTVDB с корректной привязкой к Sonarr по TVDB ID. [web:7]
+  - `/discover` — список популярных и трендовых фильмов/сериалов.
+- **Гибкие запросы:**
+  - Интерактивные кнопки «Назад/Вперёд/Запросить».
+  - Для сериалов из `/series` — выбор конкретных сезонов перед отправкой запроса.
+  - `/requests` — просмотр статуса всех своих запросов.
+- **Умное кэширование:** результаты поиска и «discover» кэшируются на 1 час для уменьшения нагрузки на API и ускорения работы.
+
+---
+
+## 🚀 Быстрый старт
+
+### Требования
+
+1. **Telegram‑бот** — токен от [@BotFather](https://t.me/botfather).  
+2. **Telegram API ID и API Hash** — берутся на [https://my.telegram.org](https://my.telegram.org).  
+3. **Сервер Jellyfin** — URL и API‑ключ (Dashboard → API Keys).  
+4. **Сервер Jellyseerr** — URL и API‑ключ (Settings → General).  
+5. **TMDB API Key** — берётся в настройках аккаунта на TheMovieDB. [web:2]  
+6. **TheTVDB v4 API Key** — оформляется в личном кабинете TheTVDB. [web:7]  
+7. Python 3.11+ (для локального запуска) или Docker (для контейнера).
+
+---
+
+## ⚙️ Установка и настройка (локально, через Python)
+
+1. **Клонируйте репозиторий:**
+    ```
+    git clone https://github.com/your-username/TellySeerr.git
+    cd TellySeerr
     ```
 
-2.  **Install dependencies using Pipenv:**
-    ```bash
+2. **Установите зависимости (через Pipenv):**
+    ```
     pipenv install
     ```
-    This will create a virtual environment and install all packages from the `Pipfile.lock`.
 
-3.  **Configure your bot:**
-    Copy the sample environment file to create your own secret file.
-    ```bash
+3. **Создайте файл `.env` на основе примера:**
+    ```
     cp .env.sample .env
     ```
-    Now, edit the `.env` file with your API keys and URLs. It's crucial that you **do not** use quotes (`"`) around the values.
 
-    ```ini
-    # --- .env file ---
+4. **Заполните `.env` (без кавычек):**
+    ```
     TELEGRAM_API_ID=1234567
     TELEGRAM_API_HASH=your_api_hash_here
     TELEGRAM_BOT_TOKEN=your_bot_token_here
 
-    JELLYSEERR_URL=[https://jellyseerr.example.com](https://jellyseerr.example.com)
+    JELLYSEERR_URL=https://jellyseerr.example.com
     JELLYSEERR_API_KEY=your_jellyseerr_api_key_here
 
-    JELLYFIN_URL=[https://jellyfin.example.com](https://jellyfin.example.com)
+    JELLYFIN_URL=https://jellyfin.example.com
     JELLYFIN_API_KEY=your_jellyfin_api_key_here
 
-    # Your personal Telegram User ID
-    ADMIN_USER_IDS=[123456789, 987654321]
+    TMDB_API_KEY=your_tmdb_api_key_here
+    TVDB_API_KEY=your_thetvdb_v4_api_key_here
+
+    ADMIN_USER_IDS=
+    DB_PATH=jellyseerr_bot.db
     ```
 
-4.  **Run the bot:**
-    ```bash
+5. **Запустите бота:**
+    ```
     pipenv run python main.py
     ```
-    The bot will start, connect to Telegram, set its commands, and initialize the database.
+
+Бот подключится к Telegram, установит команды, проинициализирует базу данных и запустит фоновую задачу очистки просроченных пользователей.
 
 ---
 
-## 🤖 Bot Commands
+## 🐳 Запуск через Docker
 
-The bot will automatically set these commands in the Telegram menu for you. Admins will see an extended list.
+1. Убедитесь, что `.env` лежит рядом с `docker-compose.yml` и заполнен.  
 
-### User Commands
-| Command | Description |
-| --- | --- |
-| `/start` | Start the bot |
-| `/help` | Show the help message |
-| `/request` | Request a movie/show. Usage: `/request <name>` |
-| `/discover` | Discover popular and trending media |
-| `/requests` | View your pending media requests |
-| `/watch` | See your personal watch statistics |
-| `/link` | Link your Jellyfin account. Usage: `/link <user> <pass>` |
-| `/unlink` | Unlink your Jellyfin account |
+2. Соберите и запустите контейнер:
+    ```
+    docker compose build
+    docker compose up -d
+    ```
 
-### Admin-Only Commands
-| Command | Description |
-| --- | --- |
-| `/invite` | Reply to a user to create a permanent account |
-| `/trial` | Reply to a user to create a 7-day trial |
-| `/vip` | Reply to a user to create a 30-day VIP account |
-| `/deleteuser` | Delete a user. Usage: `/deleteuser <username>` |
-| `/listusers` | List all users on the Jellyfin server |
+3. База данных бота (`jellyseerr_bot.db`) будет храниться в Docker volume `tellyseerr_data`.
 
 ---
 
-## 🤝 Contributing
+## 🤖 Команды бота
 
-Contributions are welcome! If you'd like to fix a bug or add a new feature, please read the `CONTRIBUTING.md` file for details on how to:
+### Пользовательские команды
 
-* Report bugs and suggest features
-* Set up your development environment
-* Follow the code style and submit your changes
+| Команда     | Описание |
+|------------|----------|
+| `/start`   | Запустить бота и получить приветствие |
+| `/help`    | Показать список команд и подсказки |
+| `/request` | Поиск фильма/сериала: `/request <название>` |
+| `/series`  | Поиск сериала по русскому названию (TheTVDB + выбор сезонов) |
+| `/discover`| Популярные и трендовые фильмы/сериалы |
+| `/requests`| Посмотреть свои запросы и их статус |
+| `/watch`   | Личная статистика просмотров из Jellyfin |
+| `/link`    | Привязать аккаунт: `/link <логин> <пароль>` |
+| `/unlink`  | Отвязать аккаунт |
+
+### Команды только для админов
+
+| Команда        | Описание |
+|----------------|----------|
+| `/invite`      | Ответьте на сообщение пользователя, чтобы создать постоянный аккаунт |
+| `/trial`       | Ответьте на сообщение, чтобы выдать тестовый доступ на 7 дней |
+| `/vip`         | Ответьте на сообщение, чтобы выдать VIP‑доступ на 30 дней |
+| `/deleteuser`  | Удалить пользователя: `/deleteuser <username>` |
+| `/listusers`   | Показать всех пользователей сервера Jellyfin |
 
 ---
 
-## 📜 License
+## 🤝 Вклад и доработка
 
-This project is licensed under the MIT License. See the `LICENSE` file for details.
+- Можно сообщать об ошибках и предлагать фичи через Issues в GitHub.  
+- Для разработки:
+  - Форкнуть репозиторий.
+  - Настроить `.env`.
+  - Установить `pipenv`, `ruff`, `pre-commit` (см. `CONTRIBUTING.md`).
+  - Добавлять новые хендлеры в `bot/handlers/` — загрузчик подключит их автоматически.
+
+---
+
+## 📜 Лицензия
+
+Проект распространяется по лицензии MIT. Полный текст — в файле `LICENSE`.
