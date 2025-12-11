@@ -21,6 +21,8 @@ logger = logging.getLogger(__name__)
 CACHE_TTL_SECONDS = 3600
 
 
+# ---------- Вспомогательные функции ----------
+
 async def _search_jellyseerr(query: str):
     if not hasattr(http_client, "search_cache"):
         http_client.search_cache = {}
@@ -42,16 +44,37 @@ async def _search_jellyseerr(query: str):
         return []
 
 
+async def _discover_jellyseerr():
+    if hasattr(http_client, "discover_cache"):
+        results, ts = http_client.discover_cache
+        if (datetime.utcnow() - ts).total_seconds() < CACHE_TTL_SECONDS:
+            return results
+
+    try:
+        movies_url = f"{settings.JELLYSEERR_URL}/api/v1/discover/movies"
+        tv_url = f"{settings.JELLYSEERR_URL}/api/v1/discover/tv"
+
+        rm = await http_client.get(movies_url, headers=jellyseerr_headers)
+        rt = await http_client.get(tv_url, headers=jellyseerr_headers)
+        rm.raise_for_status()
+        rt.raise_for_status()
+
+        results = rm.json().get("results", []) + rt.json().get("results", [])
+        http_client.discover_cache = (results, datetime.utcnow())
+        return results
+    except Exception as e:
+        logger.error(f"Discover error: {e}")
+        return []
+
+
 async def _search_tvdb_ru(query: str):
     """
-    Поиск сериалов по русскому названию через TheTVDB v4.
-    Возвращает список сериалов с полем tvdbId.
+    Поиск сериалов по русским названиям на TheTVDB v4.
     """
     try:
         url = "https://api4.thetvdb.com/v4/search"
         headers = dict(tvdb_headers)
 
-        # Если используешь динамический токен в http_client.tvdb_token — добавим его
         if hasattr(http_client, "tvdb_token"):
             headers["Authorization"] = f"Bearer {http_client.tvdb_token}"
 
@@ -63,13 +86,14 @@ async def _search_tvdb_ru(query: str):
         for s in data:
             results.append(
                 {
-                    "id": s["id"],
+                    "id": s["id"],  # TheTVDB ID
                     "name": s.get("name") or s.get("seriesName"),
                     "overview": s.get("overview") or "",
                     "firstAired": (s.get("firstAired") or "")[:4],
                     "posterPath": s.get("image"),
                     "mediaType": "tv",
-                    "tvdbId": s["id"],  # важно для Jellyseerr/Sonarr
+                    "tvdbId": s["id"],
+                    "source": "tvdb",
                 }
             )
         return results
@@ -77,6 +101,51 @@ async def _search_tvdb_ru(query: str):
         logger.error(f"TheTVDB error: {e}")
         return []
 
+
+async def tvdb_to_tmdb(tvdb_id: int) -> int | None:
+    """
+    Конвертация TheTVDB ID → TMDB ID для сериалов.
+    """
+    try:
+        url = f"https://api.themoviedb.org/3/find/{tvdb_id}"
+        params = {
+            "api_key": settings.TMDB_API_KEY,
+            "external_source": "tvdb_id",
+        }
+        r = await http_client.get(url, params=params, timeout=10)
+        r.raise_for_status()
+        res = r.json().get("tv_results") or []
+        return res[0]["id"] if res else None
+    except Exception as e:
+        logger.error(f"tvdb_to_tmdb error for {tvdb_id}: {e}")
+        return None
+
+
+async def _get_tmdb_seasons(tmdb_id: int):
+    """
+    Получение списка сезонов из TMDB для выбора пользователем.
+    """
+    try:
+        url = f"https://api.themoviedb.org/3/tv/{tmdb_id}"
+        params = {
+            "api_key": settings.TMDB_API_KEY,
+            "language": "ru",
+        }
+        r = await http_client.get(url, params=params, timeout=10)
+        r.raise_for_status()
+        data = r.json()
+        seasons = [
+            s
+            for s in data.get("seasons", [])
+            if s.get("season_number", 0) > 0
+        ]
+        return seasons
+    except Exception as e:
+        logger.error(f"Get TMDB seasons error: {e}")
+        return []
+
+
+# ---------- Команда /request (TMDB, без изменений по сути) ----------
 
 @app.on_message(filters.command("request", prefixes="/"))
 async def request_cmd(client: Client, message: Message):
@@ -94,11 +163,6 @@ async def request_cmd(client: Client, message: Message):
 
     item = results[0]
     text, photo = format_media_item(item, 0, len(results))
-
-    # Кэшируем результаты по query (как в оригинале)
-    if not hasattr(http_client, "search_cache"):
-        http_client.search_cache = {}
-    http_client.search_cache[query] = (results, datetime.utcnow())
 
     markup = create_media_pagination_markup(
         query=query,
@@ -121,32 +185,13 @@ async def request_cmd(client: Client, message: Message):
         await sent.edit(text, reply_markup=markup, parse_mode=ParseMode.HTML)
 
 
+# ---------- Команда /discover ----------
+
 @app.on_message(filters.command("discover", prefixes="/"))
 async def discover_cmd(client: Client, message: Message):
     sent = await message.reply("Discovering popular items...")
 
-    results = []
-    if hasattr(http_client, "discover_cache"):
-        results, ts = http_client.discover_cache
-        if (datetime.utcnow() - ts).total_seconds() >= CACHE_TTL_SECONDS:
-            results = []
-
-    if not results:
-        try:
-            movies_url = f"{settings.JELLYSEERR_URL}/api/v1/discover/movies"
-            tv_url = f"{settings.JELLYSEERR_URL}/api/v1/discover/tv"
-
-            rm = await http_client.get(movies_url, headers=jellyseerr_headers)
-            rt = await http_client.get(tv_url, headers=jellyseerr_headers)
-            rm.raise_for_status()
-            rt.raise_for_status()
-
-            results = rm.json().get("results", []) + rt.json().get("results", [])
-            http_client.discover_cache = (results, datetime.utcnow())
-        except Exception as e:
-            await sent.edit(t("generic_network_error", error=str(e)))
-            return
-
+    results = await _discover_jellyseerr()
     if not results:
         await sent.edit(t("no_results"))
         return
@@ -176,11 +221,10 @@ async def discover_cmd(client: Client, message: Message):
         await sent.edit(text, reply_markup=markup, parse_mode=ParseMode.HTML)
 
 
+# ---------- Команда /series (TheTVDB + выбор сезонов) ----------
+
 @app.on_message(filters.command("series", prefixes="/"))
 async def series_cmd(client: Client, message: Message):
-    """
-    Поиск сериалов по TheTVDB (русские названия), с последующей привязкой по tvdbId.
-    """
     try:
         query = message.text.split(maxsplit=1)[1]
     except IndexError:
@@ -193,10 +237,6 @@ async def series_cmd(client: Client, message: Message):
         await sent.edit(t("no_results"))
         return
 
-    # помечаем, что это результаты TheTVDB
-    for r in results:
-        r["source"] = "tvdb"
-
     item = results[0]
     text, photo = format_media_item(item, 0, len(results))
 
@@ -205,13 +245,13 @@ async def series_cmd(client: Client, message: Message):
         http_client.tvdb_cache = {}
     http_client.tvdb_cache[cache_key] = results
 
-    # В callback передаём media_type tvdb, чтобы потом понимать, что это TheTVDB
+    # media_type = tvdb → будем знать, что это TheTVDB
     markup = create_media_pagination_markup(
         query=cache_key,
         current_index=0,
         total_results=len(results),
         media_type="tvdb",
-        tmdb_id=item["id"],
+        tmdb_id=item["id"],  # TheTVDB ID
     )
 
     if photo:
@@ -226,6 +266,8 @@ async def series_cmd(client: Client, message: Message):
     else:
         await sent.edit(text, reply_markup=markup, parse_mode=ParseMode.HTML)
 
+
+# ---------- Пагинация результатов ----------
 
 @app.on_callback_query(filters.regex(r"media_nav:(prev|next):(\d+):(.+)"))
 async def media_pagination_handler(client: Client, callback_query: CallbackQuery):
@@ -248,9 +290,7 @@ async def media_pagination_handler(client: Client, callback_query: CallbackQuery
             results, _ = cached
 
     if not results:
-        await callback_query.answer(
-            t("search_cache_expired"), show_alert=True
-        )
+        await callback_query.answer(t("search_cache_expired"), show_alert=True)
         await callback_query.message.delete()
         return
 
@@ -262,19 +302,18 @@ async def media_pagination_handler(client: Client, callback_query: CallbackQuery
     item = results[idx]
     text, photo = format_media_item(item, idx, len(results))
 
-    # media_type: tvdb → особая обработка; иначе берём из item
     media_type = item.get("mediaType", "movie")
     if item.get("source") == "tvdb":
         media_type = "tvdb"
 
-    tmdb_or_tvdb_id = item.get("id")
+    media_id = item.get("id")
 
     markup = create_media_pagination_markup(
         query=query,
         current_index=idx,
         total_results=len(results),
         media_type=media_type,
-        tmdb_id=tmdb_or_tvdb_id,
+        tmdb_id=media_id,
     )
 
     try:
@@ -295,6 +334,8 @@ async def media_pagination_handler(client: Client, callback_query: CallbackQuery
     await callback_query.answer()
 
 
+# ---------- Нажатие "Запросить" ----------
+
 @app.on_callback_query(filters.regex(r"media_req:(\w+):(\d+)"))
 async def media_request_handler(client: Client, callback_query: CallbackQuery):
     media_type, raw_id = callback_query.matches[0].groups()
@@ -309,45 +350,76 @@ async def media_request_handler(client: Client, callback_query: CallbackQuery):
 
     jellyseerr_user_id = int(linked[0])
 
-    payload = {
-        "mediaType": "tv" if media_type == "tvdb" else media_type,
-        "userId": jellyseerr_user_id,
-    }
-
-    # tvdb: отправляем и mediaId, и tvdbId
-    if media_type == "tvdb":
-        payload["tvdbId"] = media_id
-        payload["mediaId"] = media_id  # Jellyseerr требует mediaId всегда
-        payload["seasons"] = "all"     # по умолчанию все сезоны, если не выбрали
-    else:
-        payload["mediaId"] = media_id
+    # Фильмы и обычные сериалы (из /request)
+    if media_type in ("movie", "tv"):
+        payload = {
+            "mediaType": media_type,
+            "mediaId": media_id,
+            "userId": jellyseerr_user_id,
+        }
         if media_type == "tv":
             payload["seasons"] = "all"
 
-    try:
-        resp = await http_client.post(
-            f"{settings.JELLYSEERR_URL}/api/v1/request",
-            headers=jellyseerr_headers,
-            json=payload,
-        )
-        resp.raise_for_status()
-        await callback_query.answer(
-            t("request_success"), show_alert=True
-        )
-    except httpx.HTTPStatusError as e:
-        if e.response.status_code == 409:
-            await callback_query.answer(
-                t("request_already"), show_alert=True
+        try:
+            r = await http_client.post(
+                f"{settings.JELLYSEERR_URL}/api/v1/request",
+                headers=jellyseerr_headers,
+                json=payload,
             )
-        else:
+            r.raise_for_status()
+            await callback_query.answer(t("request_success"), show_alert=True)
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 409:
+                await callback_query.answer(t("request_already"), show_alert=True)
+            else:
+                await callback_query.answer(
+                    f"Ошибка {e.response.status_code}", show_alert=True
+                )
+        except httpx.RequestError as e:
             await callback_query.answer(
-                f"Ошибка {e.response.status_code}", show_alert=True
+                t("generic_network_error", error=str(e)), show_alert=True
             )
-    except httpx.RequestError as e:
-        await callback_query.answer(
-            t("generic_network_error", error=str(e)), show_alert=True
-        )
+        return
 
+    # Сериалы из /series (TheTVDB): сначала конвертируем в TMDB, потом показываем сезоны
+    if media_type == "tvdb":
+        tvdb_id = media_id
+        tmdb_id = await tvdb_to_tmdb(tvdb_id)
+        if not tmdb_id:
+            await callback_query.answer(
+                "Не удалось получить TMDB ID для этого сериала.", show_alert=True
+            )
+            return
+
+        seasons = await _get_tmdb_seasons(tmdb_id)
+        if not seasons or len(seasons) <= 1:
+            # один сезон – можно сразу запросить все
+            payload = {
+                "mediaType": "tv",
+                "mediaId": tmdb_id,
+                "userId": jellyseerr_user_id,
+                "seasons": "all",
+                "tvdbId": tvdb_id,
+            }
+            await http_client.post(
+                f"{settings.JELLYSEERR_URL}/api/v1/request",
+                headers=jellyseerr_headers,
+                json=payload,
+            )
+            await callback_query.answer(t("season_all_requested"), show_alert=True)
+            return
+
+        # несколько сезонов – показываем выбор
+        markup = create_season_selection_markup(tmdb_id, len(seasons))
+        await callback_query.edit_message_reply_markup(reply_markup=markup)
+        await callback_query.answer(t("season_choose"))
+        return
+
+    # на всякий случай
+    await callback_query.answer("Неизвестный тип медиа.", show_alert=True)
+
+
+# ---------- Обработка выбора сезона ----------
 
 @app.on_callback_query(filters.regex(r"season_req:(\d+):(\w+)"))
 async def season_request_handler(client: Client, callback_query: CallbackQuery):
