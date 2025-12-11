@@ -22,6 +22,8 @@ ENV TELEGRAM_API_ID= \
     JELLYSEERR_API_KEY= \
     JELLYFIN_URL= \
     JELLYFIN_API_KEY= \
+    TMDB_API_KEY= \
+    TVDB_API_KEY= \
     ADMIN_USER_IDS= \
     DB_PATH="jellyseerr_bot.db"
 
