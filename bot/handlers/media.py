@@ -1,7 +1,5 @@
-# bot/handlers/media.py
 import httpx
 import logging
-from urllib.parse import urlencode, quote
 from datetime import datetime
 
 from pyrogram import Client, filters
@@ -10,7 +8,7 @@ from pyrogram.enums import ParseMode
 
 from bot import app
 from config import settings
-from bot.services.http_clients import http_client, jellyseerr_headers
+from bot.services.http_clients import http_client, jellyseerr_headers, tvdb_headers
 from bot.services.database import get_linked_user
 from bot.helpers.formatting import format_media_item
 from bot.helpers.markup import (
@@ -20,8 +18,7 @@ from bot.helpers.markup import (
 from bot.i18n import t
 
 logger = logging.getLogger(__name__)
-
-CACHE_TTL_SECONDS = 3600  # 1 час
+CACHE_TTL_SECONDS = 3600
 
 
 async def _search_jellyseerr(query: str):
@@ -29,63 +26,37 @@ async def _search_jellyseerr(query: str):
         http_client.search_cache = {}
 
     if query in http_client.search_cache:
-        results, timestamp = http_client.search_cache[query]
-        if (datetime.utcnow() - timestamp).total_seconds() < CACHE_TTL_SECONDS:
+        results, ts = http_client.search_cache[query]
+        if (datetime.utcnow() - ts).total_seconds() < CACHE_TTL_SECONDS:
             return results
 
-    search_url = f"{settings.JELLYSEERR_URL}/api/v1/search"
-    params = urlencode({"query": query}, quote_via=quote)
     try:
-        response = await http_client.get(
-            f"{search_url}?{params}", headers=jellyseerr_headers
-        )
-        response.raise_for_status()
-        results = response.json().get("results", [])
+        url = f"{settings.JELLYSEERR_URL}/api/v1/search"
+        r = await http_client.get(url, headers=jellyseerr_headers, params={"query": query})
+        r.raise_for_status()
+        results = r.json().get("results", [])
         http_client.search_cache[query] = (results, datetime.utcnow())
         return results
-    except httpx.RequestError as e:
-        logger.error(f"Error searching Jellyseerr: {e}")
-        return []
-
-
-async def _discover_jellyseerr():
-    if hasattr(http_client, "discover_cache"):
-        results, timestamp = http_client.discover_cache
-        if (datetime.utcnow() - timestamp).total_seconds() < CACHE_TTL_SECONDS:
-            return results
-
-    try:
-        movies_url = f"{settings.JELLYSEERR_URL}/api/v1/discover/movies"
-        tv_url = f"{settings.JELLYSEERR_URL}/api/v1/discover/tv"
-        movie_response = await http_client.get(
-            movies_url, headers=jellyseerr_headers
-        )
-        tv_response = await http_client.get(tv_url, headers=jellyseerr_headers)
-        movie_response.raise_for_status()
-        tv_response.raise_for_status()
-        results = (
-            movie_response.json().get("results", [])
-            + tv_response.json().get("results", [])
-        )
-        http_client.discover_cache = (results, datetime.utcnow())
-        return results
-    except httpx.RequestError as e:
-        logger.error(f"Error discovering media: {e}")
+    except Exception as e:
+        logger.error(f"Jellyseerr search error: {e}")
         return []
 
 
 async def _search_tvdb_ru(query: str):
+    """
+    Поиск сериалов по русскому названию через TheTVDB v4.
+    Возвращает список сериалов с полем tvdbId.
+    """
     try:
         url = "https://api4.thetvdb.com/v4/search"
+        headers = dict(tvdb_headers)
+
+        # Если используешь динамический токен в http_client.tvdb_token — добавим его
+        if hasattr(http_client, "tvdb_token"):
+            headers["Authorization"] = f"Bearer {http_client.tvdb_token}"
+
         params = {"query": query, "type": "series", "language": "ru"}
-        # Предполагается, что на уровне http_client настроен токен,
-        # здесь используем API-ключ как fallback.
-        headers = {
-            "apikey": settings.TVDB_API_KEY,
-        }
-        r = await http_client.get(
-            url, headers=headers, params=params, timeout=10
-        )
+        r = await http_client.get(url, headers=headers, params=params, timeout=10)
         r.raise_for_status()
         data = r.json().get("data", [])
         results = []
@@ -98,12 +69,12 @@ async def _search_tvdb_ru(query: str):
                     "firstAired": (s.get("firstAired") or "")[:4],
                     "posterPath": s.get("image"),
                     "mediaType": "tv",
-                    "is_tvdb": True,
+                    "tvdbId": s["id"],  # важно для Jellyseerr/Sonarr
                 }
             )
         return results
     except Exception as e:
-        logger.error(f"TheTVDB search failed: {e}")
+        logger.error(f"TheTVDB error: {e}")
         return []
 
 
@@ -112,9 +83,7 @@ async def request_cmd(client: Client, message: Message):
     try:
         query = message.text.split(maxsplit=1)[1]
     except IndexError:
-        await message.reply(
-            "Пожалуйста, укажите запрос. Использование: /request <название>"
-        )
+        await message.reply("Использование: /request <название>")
         return
 
     sent = await message.reply(t("searching"))
@@ -124,15 +93,25 @@ async def request_cmd(client: Client, message: Message):
         return
 
     item = results[0]
-    text, photo_url = format_media_item(item, 0, len(results))
+    text, photo = format_media_item(item, 0, len(results))
+
+    # Кэшируем результаты по query (как в оригинале)
+    if not hasattr(http_client, "search_cache"):
+        http_client.search_cache = {}
+    http_client.search_cache[query] = (results, datetime.utcnow())
+
     markup = create_media_pagination_markup(
-        query, 0, len(results), item.get("mediaType", "unknown"), item.get("id")
+        query=query,
+        current_index=0,
+        total_results=len(results),
+        media_type=item.get("mediaType"),
+        tmdb_id=item.get("id"),
     )
 
-    if photo_url:
+    if photo:
         await client.send_photo(
-            chat_id=message.chat.id,
-            photo=photo_url,
+            message.chat.id,
+            photo,
             caption=text,
             reply_markup=markup,
             parse_mode=ParseMode.HTML,
@@ -144,23 +123,50 @@ async def request_cmd(client: Client, message: Message):
 
 @app.on_message(filters.command("discover", prefixes="/"))
 async def discover_cmd(client: Client, message: Message):
-    sent = await message.reply("Ищу популярные тайтлы...")
-    results = await _discover_jellyseerr()
+    sent = await message.reply("Discovering popular items...")
+
+    results = []
+    if hasattr(http_client, "discover_cache"):
+        results, ts = http_client.discover_cache
+        if (datetime.utcnow() - ts).total_seconds() >= CACHE_TTL_SECONDS:
+            results = []
+
     if not results:
-        await sent.edit("Нет популярных тайтлов для отображения.")
+        try:
+            movies_url = f"{settings.JELLYSEERR_URL}/api/v1/discover/movies"
+            tv_url = f"{settings.JELLYSEERR_URL}/api/v1/discover/tv"
+
+            rm = await http_client.get(movies_url, headers=jellyseerr_headers)
+            rt = await http_client.get(tv_url, headers=jellyseerr_headers)
+            rm.raise_for_status()
+            rt.raise_for_status()
+
+            results = rm.json().get("results", []) + rt.json().get("results", [])
+            http_client.discover_cache = (results, datetime.utcnow())
+        except Exception as e:
+            await sent.edit(t("generic_network_error", error=str(e)))
+            return
+
+    if not results:
+        await sent.edit(t("no_results"))
         return
 
     query = "discover"
     item = results[0]
-    text, photo_url = format_media_item(item, 0, len(results))
+    text, photo = format_media_item(item, 0, len(results))
+
     markup = create_media_pagination_markup(
-        query, 0, len(results), item.get("mediaType", "unknown"), item.get("id")
+        query=query,
+        current_index=0,
+        total_results=len(results),
+        media_type=item.get("mediaType"),
+        tmdb_id=item.get("id"),
     )
 
-    if photo_url:
+    if photo:
         await client.send_photo(
-            chat_id=message.chat.id,
-            photo=photo_url,
+            message.chat.id,
+            photo,
             caption=text,
             reply_markup=markup,
             parse_mode=ParseMode.HTML,
@@ -172,6 +178,9 @@ async def discover_cmd(client: Client, message: Message):
 
 @app.on_message(filters.command("series", prefixes="/"))
 async def series_cmd(client: Client, message: Message):
+    """
+    Поиск сериалов по TheTVDB (русские названия), с последующей привязкой по tvdbId.
+    """
     try:
         query = message.text.split(maxsplit=1)[1]
     except IndexError:
@@ -184,18 +193,28 @@ async def series_cmd(client: Client, message: Message):
         await sent.edit(t("no_results"))
         return
 
+    # помечаем, что это результаты TheTVDB
+    for r in results:
+        r["source"] = "tvdb"
+
     item = results[0]
     text, photo = format_media_item(item, 0, len(results))
 
-    if not hasattr(http_client, "tvdb_results_cache"):
-        http_client.tvdb_results_cache = {}
     cache_key = f"tvdb_{message.from_user.id}_{hash(query)}"
-    http_client.tvdb_results_cache[cache_key] = results
+    if not hasattr(http_client, "tvdb_cache"):
+        http_client.tvdb_cache = {}
+    http_client.tvdb_cache[cache_key] = results
 
+    # В callback передаём media_type tvdb, чтобы потом понимать, что это TheTVDB
     markup = create_media_pagination_markup(
-        cache_key, 0, len(results), "tv", item["id"]
+        query=cache_key,
+        current_index=0,
+        total_results=len(results),
+        media_type="tvdb",
+        tmdb_id=item["id"],
     )
-    if photo and photo.startswith("http"):
+
+    if photo:
         await client.send_photo(
             message.chat.id,
             photo,
@@ -210,29 +229,29 @@ async def series_cmd(client: Client, message: Message):
 
 @app.on_callback_query(filters.regex(r"media_nav:(prev|next):(\d+):(.+)"))
 async def media_pagination_handler(client: Client, callback_query: CallbackQuery):
-    direction, idx_str, key_or_query = callback_query.matches[0].groups()
+    direction, idx_str, query = callback_query.matches[0].groups()
     idx = int(idx_str)
 
-    # TVDB-поиск по cache_key
-    if key_or_query.startswith("tvdb_"):
-        cache = getattr(http_client, "tvdb_results_cache", {})
-        results = cache.get(key_or_query, [])
-        if not results:
-            await callback_query.answer(
-                t("search_cache_expired"), show_alert=True
-            )
-            return
+    results = []
+
+    if query == "discover":
+        cached = getattr(http_client, "discover_cache", None)
+        if cached:
+            results, _ = cached
+    elif query.startswith("tvdb_"):
+        cache = getattr(http_client, "tvdb_cache", {})
+        results = cache.get(query, [])
     else:
-        # Обычный поиск/ discover
-        if key_or_query == "discover":
-            results = await _discover_jellyseerr()
-        else:
-            results = await _search_jellyseerr(key_or_query)
+        cache = getattr(http_client, "search_cache", {})
+        cached = cache.get(query)
+        if cached:
+            results, _ = cached
 
     if not results:
         await callback_query.answer(
             t("search_cache_expired"), show_alert=True
         )
+        await callback_query.message.delete()
         return
 
     if direction == "next" and idx < len(results) - 1:
@@ -242,35 +261,35 @@ async def media_pagination_handler(client: Client, callback_query: CallbackQuery
 
     item = results[idx]
     text, photo = format_media_item(item, idx, len(results))
-    media_type = item.get("mediaType", "tv")
+
+    # media_type: tvdb → особая обработка; иначе берём из item
+    media_type = item.get("mediaType", "movie")
+    if item.get("source") == "tvdb":
+        media_type = "tvdb"
+
     tmdb_or_tvdb_id = item.get("id")
 
     markup = create_media_pagination_markup(
-        key_or_query, idx, len(results), media_type, tmdb_or_tvdb_id
+        query=query,
+        current_index=idx,
+        total_results=len(results),
+        media_type=media_type,
+        tmdb_id=tmdb_or_tvdb_id,
     )
 
     try:
-        if photo:
-            await callback_query.edit_message_media(
-                media={
-                    "type": "photo",
-                    "media": photo,
-                    "caption": text,
-                    "parse_mode": ParseMode.HTML,
-                },
-                reply_markup=markup,
-            )
-        else:
-            await callback_query.edit_message_caption(
-                caption=text,
-                reply_markup=markup,
-                parse_mode=ParseMode.HTML,
-            )
+        await callback_query.edit_message_media(
+            media={
+                "type": "photo",
+                "media": photo or "",
+                "caption": text,
+                "parse_mode": ParseMode.HTML,
+            },
+            reply_markup=markup,
+        )
     except Exception:
         await callback_query.edit_message_caption(
-            caption=text,
-            reply_markup=markup,
-            parse_mode=ParseMode.HTML,
+            caption=text, reply_markup=markup, parse_mode=ParseMode.HTML
         )
 
     await callback_query.answer()
@@ -279,93 +298,8 @@ async def media_pagination_handler(client: Client, callback_query: CallbackQuery
 @app.on_callback_query(filters.regex(r"media_req:(\w+):(\d+)"))
 async def media_request_handler(client: Client, callback_query: CallbackQuery):
     media_type, raw_id = callback_query.matches[0].groups()
-    raw_id = int(raw_id)
+    media_id = int(raw_id)
 
-    # Для фильмов поведение старое: сразу запрос
-    if media_type != "tv":
-        user_id = str(callback_query.from_user.id)
-        linked = await get_linked_user(user_id)
-        if not linked or not linked[0]:
-            await callback_query.answer(
-                t("request_callback_need_link"), show_alert=True
-            )
-            return
-
-        payload = {
-            "mediaType": "movie",
-            "mediaId": raw_id,
-            "userId": int(linked[0]),
-        }
-        try:
-            await http_client.post(
-                f"{settings.JELLYSEERR_URL}/api/v1/request",
-                headers=jellyseerr_headers,
-                json=payload,
-            )
-            await callback_query.answer(
-                t("request_success"), show_alert=True
-            )
-        except httpx.HTTPStatusError as e:
-            if e.response.status_code == 409:
-                await callback_query.answer(
-                    t("request_already"), show_alert=True
-                )
-            else:
-                await callback_query.answer(
-                    t("generic_network_error", error=str(e)),
-                    show_alert=True,
-                )
-        except httpx.RequestError as e:
-            await callback_query.answer(
-                t("generic_network_error", error=str(e)), show_alert=True
-            )
-        return
-
-    # Для сериалов сначала выбор сезонов через TMDB
-    try:
-        url = f"https://api.themoviedb.org/3/tv/{raw_id}"
-        params = {
-            "api_key": settings.TMDB_API_KEY,
-            "language": "ru-RU",
-        }
-        r = await http_client.get(url, params=params)
-        r.raise_for_status()
-        seasons = [
-            s
-            for s in r.json().get("seasons", [])
-            if s.get("season_number", 0) > 0
-        ]
-        if len(seasons) <= 1:
-            linked = await get_linked_user(str(callback_query.from_user.id))
-            payload = {
-                "mediaType": "tv",
-                "mediaId": raw_id,
-                "seasons": "all",
-                "userId": int(linked[0]),
-            }
-            await http_client.post(
-                f"{settings.JELLYSEERR_URL}/api/v1/request",
-                headers=jellyseerr_headers,
-                json=payload,
-            )
-            await callback_query.answer(
-                t("season_all_requested"), show_alert=True
-            )
-            return
-
-        markup = create_season_selection_markup(raw_id, len(seasons))
-        await callback_query.edit_message_reply_markup(reply_markup=markup)
-        await callback_query.answer(t("season_choose"))
-    except Exception:
-        await callback_query.answer(
-            "Ошибка получения сезонов", show_alert=True
-        )
-
-
-@app.on_callback_query(filters.regex(r"season_req:(\d+):(\w+)"))
-async def season_request_handler(client: Client, callback_query: CallbackQuery):
-    tmdb_id_str, choice = callback_query.matches[0].groups()
-    tmdb_id = int(tmdb_id_str)
     linked = await get_linked_user(str(callback_query.from_user.id))
     if not linked or not linked[0]:
         await callback_query.answer(
@@ -373,7 +307,66 @@ async def season_request_handler(client: Client, callback_query: CallbackQuery):
         )
         return
 
-    payload = {"mediaType": "tv", "mediaId": tmdb_id, "userId": int(linked[0])}
+    jellyseerr_user_id = int(linked[0])
+
+    payload = {
+        "mediaType": "tv" if media_type == "tvdb" else media_type,
+        "userId": jellyseerr_user_id,
+    }
+
+    # tvdb: отправляем и mediaId, и tvdbId
+    if media_type == "tvdb":
+        payload["tvdbId"] = media_id
+        payload["mediaId"] = media_id  # Jellyseerr требует mediaId всегда
+        payload["seasons"] = "all"     # по умолчанию все сезоны, если не выбрали
+    else:
+        payload["mediaId"] = media_id
+        if media_type == "tv":
+            payload["seasons"] = "all"
+
+    try:
+        resp = await http_client.post(
+            f"{settings.JELLYSEERR_URL}/api/v1/request",
+            headers=jellyseerr_headers,
+            json=payload,
+        )
+        resp.raise_for_status()
+        await callback_query.answer(
+            t("request_success"), show_alert=True
+        )
+    except httpx.HTTPStatusError as e:
+        if e.response.status_code == 409:
+            await callback_query.answer(
+                t("request_already"), show_alert=True
+            )
+        else:
+            await callback_query.answer(
+                f"Ошибка {e.response.status_code}", show_alert=True
+            )
+    except httpx.RequestError as e:
+        await callback_query.answer(
+            t("generic_network_error", error=str(e)), show_alert=True
+        )
+
+
+@app.on_callback_query(filters.regex(r"season_req:(\d+):(\w+)"))
+async def season_request_handler(client: Client, callback_query: CallbackQuery):
+    tmdb_id_str, choice = callback_query.matches[0].groups()
+    tmdb_id = int(tmdb_id_str)
+
+    linked = await get_linked_user(str(callback_query.from_user.id))
+    if not linked or not linked[0]:
+        await callback_query.answer(
+            t("request_callback_need_link"), show_alert=True
+        )
+        return
+
+    payload = {
+        "mediaType": "tv",
+        "mediaId": tmdb_id,
+        "userId": int(linked[0]),
+    }
+
     if choice == "all":
         payload["seasons"] = "all"
         text = t("season_all_requested")
