@@ -1,4 +1,3 @@
-# bot/i18n.py
 import os
 import json
 from pathlib import Path
@@ -6,7 +5,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_LANG = os.getenv("LANGUAGE", "en").lower()
+DEFAULT_LANG = os.getenv("LANGUAGE", "ru").lower()
 LOCALES_PATHS = [
     Path("/config/locales"),
     Path("/app/locales"),
