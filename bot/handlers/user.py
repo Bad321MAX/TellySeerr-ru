@@ -1,80 +1,107 @@
-# bot/handlers/user.py
-import httpx
-from pyrogram import Client, filters
+import logging
+from pyrogram import filters
 from pyrogram.types import Message
-
+from pyrogram.enums import ParseMode
 from bot import app
 from config import settings
 from bot.services.http_clients import http_client, jellyfin_headers, jellyseerr_headers
 from bot.services.database import store_linked_user, get_linked_user, delete_linked_user
+from bot.services.user_state import user_states, UserState
 from bot.i18n import t
 
+log = logging.getLogger(__name__)
 
-@app.on_message(filters.command("link", prefixes="/") & filters.private)
-async def link_cmd(client: Client, message: Message):
-    try:
-        _, jellyfin_username, password = message.text.split(maxsplit=2)
-    except ValueError:
-        await message.reply(t("usage_link"), parse_mode=None)
+@app.on_message(filters.command("link") & filters.private)
+async def link_cmd(_, m: Message):
+    user_states.set(m.from_user.id, UserState.LINK_CREDENTIALS)
+    await m.reply(
+        "🔗 <b>Привязка аккаунта Jellyfin</b>\n\n"
+        "📝 Отправьте следующим сообщением:\n"
+        "<code>логин пароль</code>\n\n"
+        "<i>Пример:</i>\n"
+        "<code>user123 mysecretpass</code>",
+        parse_mode=ParseMode.HTML
+    )
+
+async def _handle_link_credentials(m: Message):
+    current_state = user_states.get(m.from_user.id)
+    if current_state != UserState.LINK_CREDENTIALS:
+        log.debug(f"Unexpected call to _handle_link_credentials for user {m.from_user.id}, state: {current_state}")
         return
 
-    sent = await message.reply(t("linking"))
+    # Теперь очищаем состояние
+    user_states.clear(m.from_user.id)
+
+    text = m.text.strip()
+    parts = text.split(maxsplit=1)
+    if len(parts) != 2:
+        await m.reply("❌ Неверный формат. Нужно: <code>логин пароль</code>", parse_mode=ParseMode.HTML)
+        return
+
+    username, password = parts
+    log.info(f"User {m.from_user.id} attempting to link with username: {username}")
+
+    status_msg = await m.reply("🔄 <i>Проверяю логин и пароль...</i>", parse_mode=ParseMode.HTML)
 
     try:
-        auth = await http_client.post(
+        auth_response = await http_client.post(
             f"{settings.JELLYFIN_URL}/Users/AuthenticateByName",
-            json={"Username": jellyfin_username, "Pw": password},
-            headers=jellyfin_headers,
+            json={"Username": username, "Pw": password},
+            headers=jellyfin_headers
         )
-        if auth.status_code == 401:
-            await sent.edit(t("auth_failed"))
-            return
-        auth.raise_for_status()
-        jf_id = auth.json()["User"]["Id"]
-    except httpx.RequestError as e:
-        await sent.edit(t("auth_error", error=str(e)))
-        return
+        log.info(f"Jellyfin auth response: {auth_response.status_code}")
 
-    try:
-        resp = await http_client.get(
+        if auth_response.status_code == 401:
+            await status_msg.edit("❌ <b>Неверный логин или пароль от Jellyfin</b>")
+            log.warning(f"Auth failed (401) for username {username}")
+            return
+
+        auth_response.raise_for_status()
+        jellyfin_user_id = auth_response.json()["User"]["Id"]
+        log.info(f"Authenticated Jellyfin user ID: {jellyfin_user_id}")
+
+        users_response = await http_client.get(
             f"{settings.JELLYSEERR_URL}/api/v1/user?take=1000",
-            headers=jellyseerr_headers,
+            headers=jellyseerr_headers
         )
-        resp.raise_for_status()
-        user = next(
-            (
-                u
-                for u in resp.json().get("results", [])
-                if str(u.get("jellyfinUserId")) == str(jf_id)
-            ),
-            None,
+        users_response.raise_for_status()
+        users = users_response.json().get("results", [])
+        jellyseerr_user = next(
+            (u for u in users if str(u.get("jellyfinUserId")) == str(jellyfin_user_id)),
+            None
         )
-        if not user:
-            await sent.edit(t("link_not_found_in_jellyseerr"))
+
+        if not jellyseerr_user:
+            await status_msg.edit(
+                "❌ <b>Аккаунт найден в Jellyfin, но не импортирован в Jellyseerr</b>\n"
+                "Обратитесь к администратору."
+            )
+            log.warning(f"Jellyseerr user not found for Jellyfin ID {jellyfin_user_id}")
             return
 
         await store_linked_user(
-            telegram_id=str(message.from_user.id),
-            jellyseerr_user_id=str(user["id"]),
-            jellyfin_user_id=str(jf_id),
-            username=user.get("username") or jellyfin_username,
+            telegram_id=str(m.from_user.id),
+            jellyseerr_user_id=str(jellyseerr_user["id"]),
+            jellyfin_user_id=str(jellyfin_user_id),
+            username=jellyseerr_user.get("username") or username
         )
-        await sent.edit(
-            t(
-                "link_success",
-                username=user.get("username") or jellyfin_username,
-            )
+
+        await status_msg.edit(
+            "✅ <b>Аккаунт успешно привязан!</b>\n\n"
+            "Теперь вы можете запрашивать медиа, смотреть запросы и статистику.",
+            parse_mode=ParseMode.HTML
         )
-    except httpx.RequestError as e:
-        await sent.edit(t("generic_network_error", error=str(e)))
+        log.info(f"Successfully linked user {m.from_user.id} to Jellyseerr ID {jellyseerr_user['id']}")
 
-    await message.delete()
+    except Exception as e:
+        log.error(f"Link error for user {m.from_user.id}: {str(e)}", exc_info=True)
+        await status_msg.edit("❌ <b>Ошибка при привязке</b>\nПопробуйте позже или проверьте данные.")
 
-
-@app.on_message(filters.command("unlink", prefixes="/") & filters.private)
-async def unlink_cmd(client: Client, message: Message):
-    if not await get_linked_user(str(message.from_user.id)):
-        await message.reply(t("unlink_no_link"))
+@app.on_message(filters.command("unlink") & filters.private)
+async def unlink_cmd(_, m: Message):
+    linked = await get_linked_user(str(m.from_user.id))
+    if not linked:
+        await m.reply(t("unlink_no_link"))
         return
-    await delete_linked_user(str(message.from_user.id))
-    await message.reply(t("unlink_success"))
+    await delete_linked_user(str(m.from_user.id))
+    await m.reply(t("unlink_success"))
