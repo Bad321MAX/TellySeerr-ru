@@ -3,3 +3,4 @@ kurigram
 aiosqlite
 httpx
 tgcrypto
+requirements.txt
