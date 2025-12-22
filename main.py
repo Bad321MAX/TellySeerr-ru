@@ -21,7 +21,6 @@ USER_COMMANDS = [
     BotCommand("start", "Запустить бота"),
     BotCommand("help", "Показать помощь"),
     BotCommand("request", "Поиск фильмов и сериалов"),
-    BotCommand("series", "Поиск сериалов (TheTVDB, RU)"),
     BotCommand("discover", "Популярное и тренды"),
     BotCommand("requests", "Мои запросы"),
     BotCommand("watch", "Моя статистика просмотров"),
