@@ -1,7 +1,6 @@
 from pydantic_settings import BaseSettings
 from dotenv import load_dotenv
 
-# Load environment variables from .env file
 load_dotenv()
 
 
@@ -16,10 +15,12 @@ class Config(BaseSettings):
     JELLYFIN_URL: str
     JELLYFIN_API_KEY: str
 
+    # TheTVDB & TMDB
     TMDB_API_KEY: str
     TVDB_API_KEY: str
+    
 
-    # Path to the database (defaults to the root folder)
+    # Path to the database
     DB_PATH: str = "jellyseerr_bot.db"
 
     # Admin User IDs
