@@ -1,17 +1,15 @@
-# bot/handlers/basic.py
 from pyrogram import Client, filters
 from pyrogram.types import Message
 from pyrogram.enums import ParseMode
-
 from bot import app
 from bot.i18n import t
 
+HELP_TEXT = t("help")
 
-@app.on_message(filters.command("start", prefixes="/") & filters.private)
-async def start_cmd(client: Client, message: Message):
-    await message.reply(t("start_welcome"), parse_mode=None)
+@app.on_message(filters.command("start") & filters.private)
+async def start_cmd(_: Client, message: Message):
+    await message.reply(t("start"), parse_mode=ParseMode.HTML)
 
-
-@app.on_message(filters.command("help", prefixes="/"))
-async def help_cmd(client: Client, message: Message):
-    await message.reply(t("help_text"), parse_mode=ParseMode.MARKDOWN)
+@app.on_message(filters.command("help"))
+async def help_cmd(_: Client, message: Message):
+    await message.reply(HELP_TEXT, parse_mode=ParseMode.HTML)
