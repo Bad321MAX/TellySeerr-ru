@@ -1,6 +1,7 @@
-# bot/handlers/requests.py
-from pyrogram import Client, filters
-from pyrogram.types import Message, CallbackQuery
+import logging
+import httpx
+from pyrogram import filters, Client
+from pyrogram.types import Message, CallbackQuery, InputMediaPhoto
 from pyrogram.enums import ParseMode
 
 from bot import app
@@ -11,104 +12,174 @@ from bot.helpers.formatting import format_request_item
 from bot.helpers.markup import create_requests_pagination_markup
 from bot.i18n import t
 
+log = logging.getLogger(__name__)
 
-@app.on_message(filters.command("requests", prefixes="/"))
-async def my_requests_cmd(client: Client, message: Message):
-    sent = await message.reply(t("fetching_requests"))
+# Кэш запросов (как в оригинале, но через app)
+if not hasattr(app, "request_cache"):
+    app.request_cache = {}
 
-    linked = await get_linked_user(str(message.from_user.id))
-    if not linked or not linked[0]:
-        await sent.edit(t("request_callback_need_link"))
+
+# =========================
+# /requests
+# =========================
+@app.on_message(filters.command("requests", prefixes="/") & filters.private)
+async def my_requests_cmd(_: Client, message: Message):
+    log.info(f"/requests from user {message.from_user.id}")
+
+    sent_message = await message.reply(t("fetching_requests"))
+
+    user_id = str(message.from_user.id)
+    linked_user = await get_linked_user(user_id)
+
+    if not linked_user or not linked_user[0]:
+        await sent_message.edit(t("request_callback_need_link"))
         return
+
+    jellyseerr_user_id = linked_user[0]
 
     try:
-        resp = await http_client.get(
-            f"{settings.JELLYSEERR_URL}/api/v1/request?take=1000&requestedBy={linked[0]}",
+        request_api_url = f"{settings.JELLYSEERR_URL}/api/v1/request"
+        params = {
+            "take": 100,
+            "skip": 0,
+            "sort": "added",
+            "filter": "all",
+            "requestedBy": jellyseerr_user_id,
+        }
+
+        response = await http_client.get(
+            request_api_url,
             headers=jellyseerr_headers,
+            params=params,
         )
-        resp.raise_for_status()
-        requests = resp.json().get("results", [])
-    except Exception as e:
-        await sent.edit(t("generic_network_error", error=str(e)))
+        response.raise_for_status()
+        user_requests_data = response.json().get("results", [])
+
+    except httpx.RequestError as e:
+        log.error(f"Failed to fetch requests: {e}")
+        await sent_message.edit(t("generic_network_error"))
         return
 
-    if not requests:
-        await sent.edit(t("no_requests"))
+    if not user_requests_data:
+        await sent_message.edit(t("no_requests"))
         return
 
-    if not hasattr(http_client, "user_requests_cache"):
-        http_client.user_requests_cache = {}
-    cache_key = str(message.from_user.id)
-    http_client.user_requests_cache[cache_key] = requests
+    # Сортируем как в оригинале
+    user_requests_data.sort(key=lambda r: r.get("createdAt", ""), reverse=True)
 
-    item = requests[0]
-    text, photo = await format_request_item(item, 0, len(requests))
+    # Кладём в кэш
+    app.request_cache[user_id] = user_requests_data
+
+    text, photo_url = await format_request_item(
+        user_requests_data[0], 0, len(user_requests_data)
+    )
     markup = create_requests_pagination_markup(
-        message.from_user.id, 0, len(requests)
+        int(user_id), 0, len(user_requests_data)
     )
 
-    if photo:
-        await client.send_photo(
-            message.chat.id,
-            photo,
+    if photo_url:
+        await message.reply_photo(
+            photo=photo_url,
             caption=text,
             reply_markup=markup,
             parse_mode=ParseMode.HTML,
         )
-        await sent.delete()
+        await sent_message.delete()
     else:
-        await sent.edit(text, reply_markup=markup, parse_mode=ParseMode.HTML)
-
-
-@app.on_callback_query(filters.regex(r"req_nav:(prev|next):(\d+):(\d+)"))
-async def requests_pagination_handler(client: Client, callback_query: CallbackQuery):
-    direction, idx_str, user_id_str = callback_query.matches[0].groups()
-    idx = int(idx_str)
-    user_id = int(user_id_str)
-
-    if user_id != callback_query.from_user.id:
-        await callback_query.answer("Это не ваши запросы!", show_alert=True)
-        return
-
-    cache = getattr(http_client, "user_requests_cache", {})
-    requests = cache.get(str(user_id), [])
-    if not requests:
-        await callback_query.answer(
-            t("search_cache_expired"), show_alert=True
+        await sent_message.edit(
+            text, reply_markup=markup, parse_mode=ParseMode.HTML
         )
+
+
+# =========================
+# Pagination callbacks
+# =========================
+@app.on_callback_query(filters.regex(r"req_nav:(prev|next):(\d+):(\d+)"))
+async def requests_pagination_handler(_: Client, cq: CallbackQuery):
+    match = cq.matches[0]
+    direction, current_index_str, user_id_str = match.groups()
+
+    current_index = int(current_index_str)
+    user_id = str(user_id_str)
+
+    # Защита: кнопка не от этого пользователя
+    if str(cq.from_user.id) != user_id:
+        await cq.answer(t("requests_not_yours"), show_alert=True)
         return
 
-    if direction == "next" and idx < len(requests) - 1:
-        idx += 1
-    elif direction == "prev" and idx > 0:
-        idx -= 1
+    user_requests_data = app.request_cache.get(user_id)
 
-    item = requests[idx]
-    text, photo = await format_request_item(item, idx, len(requests))
-    markup = create_requests_pagination_markup(user_id, idx, len(requests))
+    # Если кэша нет — догружаем (как в оригинале)
+    if not user_requests_data:
+        linked_user = await get_linked_user(user_id)
+        if not linked_user:
+            await cq.answer(t("request_callback_need_link"), show_alert=True)
+            return
+
+        try:
+            response = await http_client.get(
+                f"{settings.JELLYSEERR_URL}/api/v1/request",
+                headers=jellyseerr_headers,
+                params={
+                    "take": 100,
+                    "skip": 0,
+                    "sort": "added",
+                    "filter": "all",
+                    "requestedBy": linked_user[0],
+                },
+            )
+            response.raise_for_status()
+            user_requests_data = response.json().get("results", [])
+            user_requests_data.sort(
+                key=lambda r: r.get("createdAt", ""), reverse=True
+            )
+            app.request_cache[user_id] = user_requests_data
+
+        except Exception as e:
+            log.error(f"Error re-fetching requests: {e}")
+            await cq.answer(t("generic_network_error"), show_alert=True)
+            return
+
+    if not user_requests_data:
+        await cq.answer(t("no_requests"), show_alert=True)
+        return
+
+    new_index = current_index + (1 if direction == "next" else -1)
+
+    if not (0 <= new_index < len(user_requests_data)):
+        await cq.answer(t("end_of_list"))
+        return
+
+    item = user_requests_data[new_index]
+    text, photo_url = await format_request_item(
+        item, new_index, len(user_requests_data)
+    )
+    markup = create_requests_pagination_markup(
+        int(user_id), new_index, len(user_requests_data)
+    )
 
     try:
-        if photo:
-            await callback_query.edit_message_media(
-                media={
-                    "type": "photo",
-                    "media": photo,
-                    "caption": text,
-                    "parse_mode": ParseMode.HTML,
-                },
+        if photo_url:
+            await cq.edit_message_media(
+                media=InputMediaPhoto(
+                    media=photo_url,
+                    caption=text,
+                    parse_mode=ParseMode.HTML,
+                ),
                 reply_markup=markup,
             )
         else:
-            await callback_query.edit_message_caption(
+            await cq.edit_message_caption(
                 caption=text,
                 reply_markup=markup,
                 parse_mode=ParseMode.HTML,
             )
-    except Exception:
-        await callback_query.edit_message_caption(
+    except Exception as e:
+        log.warning(f"Fallback edit caption: {e}")
+        await cq.edit_message_caption(
             caption=text,
             reply_markup=markup,
             parse_mode=ParseMode.HTML,
         )
 
-    await callback_query.answer()
+    await cq.answer()
