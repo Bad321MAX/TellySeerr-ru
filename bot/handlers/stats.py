@@ -1,7 +1,6 @@
-# bot/handlers/starts.py
+import logging
 import html
-
-from pyrogram import Client, filters
+from pyrogram import filters, Client
 from pyrogram.types import Message
 from pyrogram.enums import ParseMode
 
@@ -11,75 +10,92 @@ from bot.services.http_clients import http_client, jellyfin_headers
 from bot.services.database import get_linked_user
 from bot.i18n import t
 
+log = logging.getLogger(__name__)
 
-@app.on_message(filters.command("watch", prefixes="/"))
-async def watch_stats_cmd(client: Client, message: Message):
-    sent = await message.reply(t("fetching_watch"))
 
-    linked = await get_linked_user(str(message.from_user.id))
-    if not linked:
-        await sent.edit(t("watch_no_link"))
+@app.on_message(filters.command("watch", prefixes="/") & filters.private)
+async def watch_stats_cmd(_: Client, m: Message):
+    log.info(f"User {m.from_user.id} called /watch")
+
+    sent_message = await m.reply(t("fetching_watch"))
+
+    # ─────────────────────────────────────────────
+    # Проверка привязки аккаунта
+    # ─────────────────────────────────────────────
+    linked_user = await get_linked_user(str(m.from_user.id))
+    if not linked_user:
+        await sent_message.edit(t("watch_no_link"))
+        log.warning(f"No linked account for user {m.from_user.id}")
         return
 
-    _, jf_id, _ = linked[:3]
-    if not jf_id:
-        await sent.edit(t("watch_no_userid"))
+    _, jellyfin_user_id, _ = linked_user[:3]
+    if not jellyfin_user_id:
+        await sent_message.edit(t("watch_no_userid"))
+        log.warning(f"No Jellyfin user ID for user {m.from_user.id}")
         return
+
+    # ─────────────────────────────────────────────
+    # Получаем просмотренные элементы пользователя
+    # Используем официальный Jellyfin API
+    # ─────────────────────────────────────────────
+    items_url = f"{settings.JELLYFIN_URL}/Users/{jellyfin_user_id}/Items"
+    params = {
+        "Recursive": "true",
+        "IncludeItemTypes": "Movie,Episode",
+        "Filters": "IsPlayed",
+        "Fields": "UserData,SeriesName",
+    }
 
     try:
-        resp = await http_client.get(
-            f"{settings.JELLYFIN_URL}/Users/{jf_id}/Items",
+        response = await http_client.get(
+            items_url,
             headers=jellyfin_headers,
-            params={
-                "Recursive": "true",
-                "IncludeItemTypes": "Movie,Episode",
-                "Filters": "IsPlayed",
-                "Fields": "RunTimeTicks,UserData,SeriesName",
-            },
+            params=params,
         )
-        resp.raise_for_status()
-        items = resp.json().get("Items", [])
+        log.info(f"/watch API response: {response.status_code}")
+        response.raise_for_status()
+        items = response.json().get("Items", [])
     except Exception as e:
-        await sent.edit(t("generic_network_error", error=str(e)))
+        await sent_message.edit(t("generic_network_error"))
+        log.error(f"Error fetching watch stats: {e}")
         return
 
-    count = len(items)
-    total_ticks = sum(
-        i.get("RunTimeTicks", 0) for i in items if i.get("RunTimeTicks")
-    )
-    total_seconds = total_ticks / 10_000_000
-    days, rem = divmod(total_seconds, 86400)
-    hours, rem = divmod(rem, 3600)
-    minutes, _ = divmod(rem, 60)
+    # ─────────────────────────────────────────────
+    # Количество просмотренных элементов
+    # ─────────────────────────────────────────────
+    watched_count = len(items)
 
-    last_title = t("no_last_watched")
+    # ─────────────────────────────────────────────
+    # Последний просмотренный тайтл
+    # (по LastPlayedDate)
+    # ─────────────────────────────────────────────
+    last_watched_title = t("no_last_watched")
+
     if items:
-        played = [
-            i
-            for i in items
-            if i.get("UserData", {}).get("LastPlayedDate")
-        ]
-        if played:
-            last = max(
-                played,
-                key=lambda x: x["UserData"]["LastPlayedDate"],
-            )
-            name = last.get("Name") or ""
-            if last.get("Type") == "Episode" and last.get("SeriesName"):
-                name = f"{last['SeriesName']} — {name}"
-            last_title = html.escape(name)
+        items.sort(
+            key=lambda x: x.get("UserData", {}).get("LastPlayedDate", ""),
+            reverse=True,
+        )
+        item = items[0]
+        title = item.get("Name", "Unknown")
 
-    text = t(
-        "watch_stats_title",
-        name=html.escape(message.from_user.first_name or "Пользователь"),
-    )
-    text += "\n" + t("watch_total_items", count=count)
-    text += "\n" + t(
-        "watch_total_time",
-        days=int(days),
-        hours=int(hours),
-        minutes=int(minutes),
-    )
-    text += "\n" + t("watch_last_watched", title=last_title)
+        if item.get("Type") == "Episode":
+            series = item.get("SeriesName")
+            if series:
+                title = f"{series} — {title}"
 
-    await sent.edit(text, parse_mode=ParseMode.HTML)
+        last_watched_title = html.escape(title)
+
+    # ─────────────────────────────────────────────
+    # Формирование ответа
+    # ─────────────────────────────────────────────
+    username_html = html.escape(m.from_user.first_name or "Пользователь")
+
+    text = (
+        f"📊 <b>{username_html}'s Watch Statistics</b>\n\n"
+        f"<b>📺 Total Watched Items:</b> {watched_count}\n"
+        f"<b>👀 Last Watched:</b> {last_watched_title}\n\n"
+        f"<i>Полное время просмотра недоступно без user token</i>"
+    )
+
+    await sent_message.edit(text, parse_mode=ParseMode.HTML)
